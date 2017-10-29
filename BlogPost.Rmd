@@ -1,0 +1,97 @@
+---
+title: "Segmentação/Classificação no R"
+author: "Felipe Barros"
+date: "5 de junho de 2016"
+output: html_document
+---
+Há algum tempo comecei a usar mais o software *R* para análises espaciais. Trata-se de um software de grande possibilidade para análise exploratória e modelagens estatísticas. O que eu não imaginei foi a possibilidade de utilizá-lo para sensoriamento remoto.
+
+E o mais louco de tudo isso é a possibilidade de faze tais análises (por exemplo, classificação de imagem de satélite) sem a necessidade de pacotes específicos. Afinal, em sua maioria, estamos sempre trabalhando com estatística, independente da finalidade.
+
+Resolvi, portanto, compartilhar aqui uma classificação não supervisionada que fiz baseada no algoritmos K-means. De início estava interessado em entender o processo de segmentação, como o de crescimento de região, disponível no software *SPRING*. Há diferentes algoritmos de segmentação de imagens e a ideia geral é agrupar pixels com características similares, como por exemplo, nível de cinza, textura e contraste, resultando em áreas com resposta espectral homogêneas (ou melhor, dentor de um padrão). Não sou especialista, por isso incentivo à todos que pesquisem mais a respeito [no manual *spring*](http://www.mundogeomatica.com.br/Livros/Livro_Spring_5.1.2_Aplicacoes_Praticas/LivroSPRING512PassoaPassoAplicacaoPratica.pdf) ou no [artigo do Sadeck](https://geotecnologias.wordpress.com/2010/08/19/classificacao-orientada-a-objeto-consideracoes/).
+
+##K-means
+O algoritmo K-means, foi colocado no [artigo do Sadeck](https://geotecnologias.wordpress.com/2010/08/19/classificacao-orientada-a-objeto-consideracoes/) como um possível algoritmo de segmentação. Contudo, por ele realizar uma análise de agrupamento (*clustering*), e definir classes de grupos a cada pixel, estarei o considerando aqui, como  um algoritmo de classificação **não supervisionado**. Logo, o algoritmo K-means **não está baseada no método de crescimento por região**, que era meu objetivo inicial.
+
+Oque faz o K-means? O algoritmo cria $k$ grupos com respostas espectrais similares a partir dos valores dos pixels da(s) imagem(ns). Portanto, não consideram elementos como, contraste e textura. Esta abordagem classifica da imagem em $k$ grupos (definidos à priori pelo usário), que serão agrupados (classificados) estatísticamente em diferentes iterações de forma a reduzir o erro qudrático médio intra grupos e, por consequência, aumentar a distância entre os grupos (*clusters*). Para mais informações [Kmeans](https://en.wikipedia.org/wiki/K-means_clustering).  
+
+```{r load_labs, echo=FALSE, message=FALSE, warning=FALSE}
+source('/home/felipe/Projetos/SegmentationFCT/segmentation.R')
+# loading libraries
+library(rgdal)
+library(raster)
+library(rgeos)
+library(RColorBrewer)
+```
+
+##Classificação não supervisionada no R
+Como exemplo, farei uma análise da cobertura do município do Rio de Janeiro, usando uma cena do satélite LandSat 8 OLI, para a data de 2015.
+
+```{r dataPrep, echo=FALSE, warning=FALSE, message=FALSE, error=FALSE, results='hide'}  
+# loading landsSat image
+rj_2016 <- stack('./Landsat_imagery/rj_2016_pixel.tif')
+# Loading county boundary
+rj <- readOGR(dsn='./shape/', layer='33MUE250GC_SIR')
+# unique(rj@data$NM_MUNICIP)
+rj <- rj[rj@data$NM_MUNICIP=='RIO DE JANEIRO',]
+
+#Changing Carthographc Reference System
+rj <- spTransform(rj, CRS=CRS(proj4string(rj_2016)))
+
+# Changing LandSat extent
+rj_2016 <- crop(rj_2016, rj)
+
+# Calculatin NDVI
+ndvi <- overlay(rj_2016[[4]], rj_2016[[5]], fun=function(x,y){(x-y)/(x+y)})
+rj_2016_2 <- addLayer(rj_2016,ndvi)
+#plotRGB(rj_2016_2, r=7,g=3, b=2, stretch='hist')
+
+library(RColorBrewer)
+pallete <- brewer.pal(6, 'Accent')
+```  
+
+### Dados básicos da análise  
+
+Para a classificação vou usar a cena com todas as bandas mais o NDVI. Na figura abaixo, vemos a composição r=4, g=2 e b=1.
+```{r plotLandSat, echo=FALSE}
+# Plotting input data
+plotRGB(rj_2016, r=4, g=2, b=1, stretch='hist')
+plot(rj, add=TRUE)
+```  
+  
+Analisando o histograma das bandas 1, 2, 3 e 4 (para simplificar a visualização).  
+  
+```{r density, echo=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+library(rasterVis)
+densityplot(rj_2016_2[[1:4]])
+```  
+
+##Resultado  
+  
+
+Da cena utilizada, fizemos a classificação em seis grupos distintos, ilustrados abaixo.
+
+```{r results, echo=FALSE, warning=FALSE,message=FALSE,error=FALSE}
+# Result
+RJ_2016_seg <- raster('./km_segmentation_RJ_2016.tif')
+plot(RJ_2016_seg, col=pallete)
+```  
+
+O tempo de processamento é curtíssimo. **Sim, eu sei. Esse processo não é nenhuma novidade. Contudo, acredito ser de grande valia por termos a possibilidade de nos apropiarmos dos resultados estatísticos para explora-los, tanto no pré quanto no pós processamento.**  
+
+Visualmente, poderíamos atribuir aos grupos as seguintes classes:  
+  
+1. **classe 1**, com cor **verde**: poderia ser classificada como **áreas florestais**  
+1. **classe 2**, com cor **roxa** (ou coisa parecida): seriam as **áreas urbanas**  
+1. **classe 3**, com cor **laranja**: seriam áreas florestais, mas com alguma diferença da **classe 1** (possivelmente em diferente estágio sucessional ou nível de degradação)  
+1. **classe 4**, em **amarelo**: que pouco aparecem, seriam **áreas de areia**  
+1. **classe 5**, em **azul**: seriam **corpos d'água**  
+1. **classe 6**, em **vermelho**: **áreas urbanas**, mas com resposta diferente da **classe 2**  
+  
+## Perspectivas futuras  
+  
+Ainda não pude pesquisar, mas imagino que existam pacotes específicos do **R** para Sensoriamento Remoto, que poderão nos ajudar bastante em análises complementares.
+
+Comentários são bem-vindos e caso também estejamexplorando o universo **R** e  tenham curiosidade, avisem que compartilho o script!
+
+Até a próxima.
